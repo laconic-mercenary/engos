@@ -1,0 +1,27 @@
+[package]
+name = "engos"
+version = "0.1.0"
+edition = "2024"
+
+# Phase 1 — watcher + ingestion only.
+# Remaining deps are added per phase as described in PROMPT.md.
+[dependencies]
+tokio  = { version = "1.52.3", features = ["full"] }
+notify = "8.2.0"
+
+# Uncomment as each phase is built:
+ratatui    = "0.30.0"
+crossterm  = "0.29.0"
+serde      = { version = "1.0.228", features = ["derive"] }
+serde_yml  = "0.0.12"               # YAML config (serde_yaml is deprecated — use this fork)
+# serde_json = "1.0.150"            # needed in Phase 3 for Anthropic API response parsing
+# reqwest     = { version = "0.13.4", features = ["json", "rustls-tls"], default-features = false }
+# image       = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+# toml        = "1.1.2"
+# async-trait = "0.1.89"
+
+[dev-dependencies]
+tempfile   = "3.27.0"
+assert_cmd = "2.2.2"
+predicates = "3.1.4"
+tokio      = { version = "1.52.3", features = ["full"] }
