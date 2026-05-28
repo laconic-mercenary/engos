@@ -1,6 +1,6 @@
-//! New Project form — state, key handling, and rendering.
+//! New Report form — state, key handling, and rendering.
 //!
-//! Collects: project name and specialist orchestrator.
+//! Collects: report name and specialist orchestrator.
 //! The project directory is derived automatically as `~/.engos/projects/<name>`
 //! and is not exposed in the UI.
 //!
@@ -25,7 +25,7 @@ use ratatui::{
 
 /// Tab order: Name → Orchestrator → NewOrchestrator → Cancel → Next → Name
 #[derive(Debug, Clone, PartialEq)]
-pub enum NewProjectFocus {
+pub enum NewReportFocus {
     Name,
     Orchestrator,
     /// The `[ + New Orchestrator ]` button below the orchestrator dropdown.
@@ -48,7 +48,7 @@ pub enum OrchestratorSelection {
 // ── State ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-pub struct NewProjectState {
+pub struct NewReportState {
     // ── Name input ────────────────────────────────────────────────────────────
     pub name_chars:  Vec<char>,
     pub name_cursor: usize,
@@ -64,26 +64,26 @@ pub struct NewProjectState {
     /// Consumers (capabilities screen, file writing) read this field.
     pub dir_confirmed: String,
 
-    pub focus: NewProjectFocus,
+    pub focus: NewReportFocus,
 }
 
-pub fn new_state() -> NewProjectState {
+pub fn new_state() -> NewReportState {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    NewProjectState {
+    NewReportState {
         name_chars:    Vec::new(),
         name_cursor:   0,
         orch_sel:      OrchestratorSelection::Unset,
         orch_open:     false,
         orch_hover:    0,
         dir_confirmed: format!("{home}/.engos/projects/"),
-        focus:         NewProjectFocus::Name,
+        focus:         NewReportFocus::Name,
     }
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum NewProjectAction {
+pub enum NewReportAction {
     Cancel,
     OpenNewOrchestrator,
     Next,
@@ -92,7 +92,7 @@ pub enum NewProjectAction {
 /// True when the form has enough information to proceed.
 ///
 /// Required: a non-empty name and a confirmed orchestrator selection.
-pub fn is_valid(state: &NewProjectState) -> bool {
+pub fn is_valid(state: &NewReportState) -> bool {
     !state.name_chars.is_empty()
         && matches!(state.orch_sel, OrchestratorSelection::Selected(_))
 }
@@ -100,27 +100,27 @@ pub fn is_valid(state: &NewProjectState) -> bool {
 // ── Key handling ──────────────────────────────────────────────────────────────
 
 pub fn handle_key(
-    state: NewProjectState,
+    state: NewReportState,
     orchestrators: &[Orchestrator],
     key: KeyEvent,
-) -> (NewProjectState, Option<NewProjectAction>) {
+) -> (NewReportState, Option<NewReportAction>) {
     if state.orch_open {
         return handle_orch_dropdown(state, orchestrators, key);
     }
 
     match state.focus.clone() {
-        NewProjectFocus::Name            => handle_name(state, key),
-        NewProjectFocus::Orchestrator    => handle_orch_closed(state, key),
-        NewProjectFocus::NewOrchestrator => handle_new_orch_btn(state, key),
-        NewProjectFocus::Cancel          => handle_cancel(state, key),
-        NewProjectFocus::Next            => handle_next(state, key),
+        NewReportFocus::Name            => handle_name(state, key),
+        NewReportFocus::Orchestrator    => handle_orch_closed(state, key),
+        NewReportFocus::NewOrchestrator => handle_new_orch_btn(state, key),
+        NewReportFocus::Cancel          => handle_cancel(state, key),
+        NewReportFocus::Next            => handle_next(state, key),
     }
 }
 
 fn handle_name(
-    mut state: NewProjectState,
+    mut state: NewReportState,
     key: KeyEvent,
-) -> (NewProjectState, Option<NewProjectAction>) {
+) -> (NewReportState, Option<NewReportAction>) {
     match key.code {
         KeyCode::Char(c) => {
             // Only alphanumeric, underscore, dash — safe as a directory name component.
@@ -141,17 +141,17 @@ fn handle_name(
         }
         KeyCode::Left  => { state.name_cursor = state.name_cursor.saturating_sub(1); (state, None) }
         KeyCode::Right => { if state.name_cursor < state.name_chars.len() { state.name_cursor += 1; } (state, None) }
-        KeyCode::Tab | KeyCode::Enter => { state.focus = NewProjectFocus::Orchestrator; (state, None) }
+        KeyCode::Tab | KeyCode::Enter => { state.focus = NewReportFocus::Orchestrator; (state, None) }
         KeyCode::BackTab => { (state, None) } // first field — no-op
-        KeyCode::Esc => (state, Some(NewProjectAction::Cancel)),
+        KeyCode::Esc => (state, Some(NewReportAction::Cancel)),
         _ => (state, None),
     }
 }
 
 fn handle_orch_closed(
-    mut state: NewProjectState,
+    mut state: NewReportState,
     key: KeyEvent,
-) -> (NewProjectState, Option<NewProjectAction>) {
+) -> (NewReportState, Option<NewReportAction>) {
     match key.code {
         KeyCode::Enter | KeyCode::Down => {
             state.orch_open  = true;
@@ -161,18 +161,18 @@ fn handle_orch_closed(
             };
             (state, None)
         }
-        KeyCode::Tab     => { state.focus = NewProjectFocus::NewOrchestrator; (state, None) }
-        KeyCode::BackTab => { state.focus = NewProjectFocus::Name;            (state, None) }
-        KeyCode::Esc     => (state, Some(NewProjectAction::Cancel)),
+        KeyCode::Tab     => { state.focus = NewReportFocus::NewOrchestrator; (state, None) }
+        KeyCode::BackTab => { state.focus = NewReportFocus::Name;            (state, None) }
+        KeyCode::Esc     => (state, Some(NewReportAction::Cancel)),
         _ => (state, None),
     }
 }
 
 fn handle_orch_dropdown(
-    mut state: NewProjectState,
+    mut state: NewReportState,
     orchestrators: &[Orchestrator],
     key: KeyEvent,
-) -> (NewProjectState, Option<NewProjectAction>) {
+) -> (NewReportState, Option<NewReportAction>) {
     let total = orchestrators.len();
 
     if total == 0 {
@@ -188,7 +188,7 @@ fn handle_orch_dropdown(
             state.orch_sel  = OrchestratorSelection::Selected(state.orch_hover);
             state.orch_open = false;
             // Advance focus past the dropdown after a successful selection.
-            state.focus = NewProjectFocus::NewOrchestrator;
+            state.focus = NewReportFocus::NewOrchestrator;
             (state, None)
         }
         KeyCode::Esc => { state.orch_open = false; (state, None) }
@@ -197,43 +197,43 @@ fn handle_orch_dropdown(
 }
 
 fn handle_new_orch_btn(
-    mut state: NewProjectState,
+    mut state: NewReportState,
     key: KeyEvent,
-) -> (NewProjectState, Option<NewProjectAction>) {
+) -> (NewReportState, Option<NewReportAction>) {
     match key.code {
-        KeyCode::Enter   => (state, Some(NewProjectAction::OpenNewOrchestrator)),
-        KeyCode::Tab     => { state.focus = NewProjectFocus::Cancel;          (state, None) }
-        KeyCode::BackTab => { state.focus = NewProjectFocus::Orchestrator;    (state, None) }
-        KeyCode::Esc     => (state, Some(NewProjectAction::Cancel)),
+        KeyCode::Enter   => (state, Some(NewReportAction::OpenNewOrchestrator)),
+        KeyCode::Tab     => { state.focus = NewReportFocus::Cancel;          (state, None) }
+        KeyCode::BackTab => { state.focus = NewReportFocus::Orchestrator;    (state, None) }
+        KeyCode::Esc     => (state, Some(NewReportAction::Cancel)),
         _ => (state, None),
     }
 }
 
 fn handle_cancel(
-    mut state: NewProjectState,
+    mut state: NewReportState,
     key: KeyEvent,
-) -> (NewProjectState, Option<NewProjectAction>) {
+) -> (NewReportState, Option<NewReportAction>) {
     match key.code {
-        KeyCode::Enter   => (state, Some(NewProjectAction::Cancel)),
-        KeyCode::Tab     => { state.focus = NewProjectFocus::Next;            (state, None) }
-        KeyCode::BackTab => { state.focus = NewProjectFocus::NewOrchestrator; (state, None) }
-        KeyCode::Esc     => (state, Some(NewProjectAction::Cancel)),
+        KeyCode::Enter   => (state, Some(NewReportAction::Cancel)),
+        KeyCode::Tab     => { state.focus = NewReportFocus::Next;            (state, None) }
+        KeyCode::BackTab => { state.focus = NewReportFocus::NewOrchestrator; (state, None) }
+        KeyCode::Esc     => (state, Some(NewReportAction::Cancel)),
         _ => (state, None),
     }
 }
 
 fn handle_next(
-    mut state: NewProjectState,
+    mut state: NewReportState,
     key: KeyEvent,
-) -> (NewProjectState, Option<NewProjectAction>) {
+) -> (NewReportState, Option<NewReportAction>) {
     match key.code {
         KeyCode::Enter => {
             // Only fire when the form is complete — Enter on a disabled Next is ignored.
-            if is_valid(&state) { (state, Some(NewProjectAction::Next)) } else { (state, None) }
+            if is_valid(&state) { (state, Some(NewReportAction::Next)) } else { (state, None) }
         }
-        KeyCode::Tab     => { state.focus = NewProjectFocus::Name;   (state, None) }
-        KeyCode::BackTab => { state.focus = NewProjectFocus::Cancel; (state, None) }
-        KeyCode::Esc     => (state, Some(NewProjectAction::Cancel)),
+        KeyCode::Tab     => { state.focus = NewReportFocus::Name;   (state, None) }
+        KeyCode::BackTab => { state.focus = NewReportFocus::Cancel; (state, None) }
+        KeyCode::Esc     => (state, Some(NewReportAction::Cancel)),
         _ => (state, None),
     }
 }
@@ -245,7 +245,7 @@ fn handle_next(
 /// This is the only place `dir_confirmed` is updated — the operator never
 /// sees or edits it directly. The value is consumed by the Capabilities screen
 /// when writing `local-config.yml` and `local-models.yml`.
-fn sync_dir(state: &mut NewProjectState) {
+fn sync_dir(state: &mut NewReportState) {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let name: String = state.name_chars.iter().collect();
     state.dir_confirmed = format!("{home}/.engos/projects/{name}");
@@ -256,7 +256,7 @@ fn sync_dir(state: &mut NewProjectState) {
 pub fn render(
     frame: &mut Frame,
     area: Rect,
-    state: &NewProjectState,
+    state: &NewReportState,
     orchestrators: &[Orchestrator],
 ) {
     let form_w = 68_u16.min(area.width);
@@ -266,7 +266,7 @@ pub fn render(
     frame.render_widget(Clear, form_area);
     frame.render_widget(
         Block::default()
-            .title(Span::styled(" NEW PROJECT ", theme::text_active()))
+            .title(Span::styled(" NEW REPORT ", theme::text_active()))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(theme::border_active()),
@@ -311,13 +311,13 @@ pub fn render(
     }
 }
 
-fn render_name_field(frame: &mut Frame, label: Rect, input: Rect, state: &NewProjectState) {
+fn render_name_field(frame: &mut Frame, label: Rect, input: Rect, state: &NewReportState) {
     frame.render_widget(
         Paragraph::new(Span::styled("  Name", theme::text_hint())),
         label,
     );
 
-    let focused = state.focus == NewProjectFocus::Name;
+    let focused = state.focus == NewReportFocus::Name;
     let before: String = state.name_chars[..state.name_cursor].iter().collect();
     let after:  String = state.name_chars[state.name_cursor..].iter().collect();
 
@@ -347,7 +347,7 @@ fn render_orch_field(
     frame: &mut Frame,
     label: Rect,
     field: Rect,
-    state: &NewProjectState,
+    state: &NewReportState,
     orchestrators: &[Orchestrator],
 ) {
     frame.render_widget(
@@ -355,7 +355,7 @@ fn render_orch_field(
         label,
     );
 
-    let focused = state.focus == NewProjectFocus::Orchestrator || state.orch_open;
+    let focused = state.focus == NewReportFocus::Orchestrator || state.orch_open;
     let (text, style) = match &state.orch_sel {
         OrchestratorSelection::Unset => (
             " Please select a model  ▼".to_string(),
@@ -379,8 +379,8 @@ fn render_orch_field(
     );
 }
 
-fn render_new_orch_btn(frame: &mut Frame, area: Rect, state: &NewProjectState) {
-    let focused = state.focus == NewProjectFocus::NewOrchestrator;
+fn render_new_orch_btn(frame: &mut Frame, area: Rect, state: &NewReportState) {
+    let focused = state.focus == NewReportFocus::NewOrchestrator;
     frame.render_widget(
         Paragraph::new(Span::styled(
             "  [ New ]",
@@ -394,7 +394,7 @@ fn render_new_orch_btn(frame: &mut Frame, area: Rect, state: &NewProjectState) {
 ///
 /// `[ Next ]` is styled active only when the form is valid — dim otherwise so
 /// the operator knows something is still missing before they can proceed.
-fn render_bottom_buttons(frame: &mut Frame, area: Rect, state: &NewProjectState) {
+fn render_bottom_buttons(frame: &mut Frame, area: Rect, state: &NewReportState) {
     let valid = is_valid(state);
 
     let cols = Layout::default()
@@ -411,12 +411,12 @@ fn render_bottom_buttons(frame: &mut Frame, area: Rect, state: &NewProjectState)
     frame.render_widget(
         Paragraph::new(Span::styled(
             "[ Cancel ]",
-            if state.focus == NewProjectFocus::Cancel { theme::selected() } else { theme::text_hint() },
+            if state.focus == NewReportFocus::Cancel { theme::selected() } else { theme::text_hint() },
         )),
         cols[1],
     );
 
-    let next_style = match (state.focus == NewProjectFocus::Next, valid) {
+    let next_style = match (state.focus == NewReportFocus::Next, valid) {
         (true, true)  => theme::selected(),
         (false, true) => theme::text_active(),
         _             => theme::text_hint(), // dim when invalid regardless of focus
@@ -430,7 +430,7 @@ fn render_bottom_buttons(frame: &mut Frame, area: Rect, state: &NewProjectState)
 fn render_orch_dropdown(
     frame: &mut Frame,
     field_area: Rect,
-    state: &NewProjectState,
+    state: &NewReportState,
     orchestrators: &[Orchestrator],
 ) {
     if orchestrators.is_empty() {

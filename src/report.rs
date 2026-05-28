@@ -15,12 +15,12 @@ use serde::{Deserialize, Serialize};
 
 // ── Data model ────────────────────────────────────────────────────────────────
 
-/// A single engagement project loaded from `~/.engos/projects.json`.
+/// A single engagement report loaded from `~/.engos/reports.json`.
 ///
 /// All fields are strings or integers so the JSON schema stays simple and
 /// human-editable without requiring any date-parsing library.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Project {
+pub struct Report {
     /// Human-readable engagement name shown in the project list.
     pub name: String,
     /// ISO 8601 datetime string for when the engagement started.
@@ -34,47 +34,47 @@ pub struct Project {
     /// Number of artifacts that have been synthesised into the report structure.
     pub artifacts_synthesized: u64,
     /// ISO 8601 datetime the project was last opened in engos, if ever.
-    /// `None` for projects that were created but never opened interactively.
+    /// `None` for reports that were created but never opened interactively.
     #[serde(default)]
     pub last_opened: Option<String>,
     /// ISO 8601 datetime the project data was last written to disk.
-    /// `None` for projects imported from an older config that predates this field.
+    /// `None` for reports imported from an older config that predates this field.
     #[serde(default)]
     pub last_modified: Option<String>,
 }
 
 // ── Navigation state ──────────────────────────────────────────────────────────
 
-/// All state needed to render and navigate the projects screen.
+/// All state needed to render and navigate the reports screen.
 ///
 /// Plain data — no methods. Logic lives in free functions below.
 #[derive(Debug, Clone)]
-pub struct ProjectState {
+pub struct ReportState {
     /// Index of the currently highlighted project, or `None` if the list is empty.
     pub selected: Option<usize>,
 }
 
-impl ProjectState {
+impl ReportState {
     /// Initialise state from the loaded project list.
     ///
     /// Pre-selects the first project so the stats pane is never blank on load
     /// (assuming at least one project exists).
-    pub fn init(projects: &[Project]) -> Self {
+    pub fn init(reports: &[Report]) -> Self {
         Self {
-            selected: if projects.is_empty() { None } else { Some(0) },
+            selected: if reports.is_empty() { None } else { Some(0) },
         }
     }
 }
 
 // ── Key handling ──────────────────────────────────────────────────────────────
 
-/// Produce the next [`ProjectState`] from a keypress.
+/// Produce the next [`ReportState`] from a keypress.
 ///
 /// `↑`/`↓` navigate the list with wrap-around. All other keys are ignored so
 /// they do not get consumed before reaching other handlers.
-pub fn handle_key(state: ProjectState, projects: &[Project], key: KeyEvent) -> ProjectState {
+pub fn handle_key(state: ReportState, reports: &[Report], key: KeyEvent) -> ReportState {
     // Nothing to navigate if the list is empty.
-    if projects.is_empty() {
+    if reports.is_empty() {
         return state;
     }
 
@@ -82,14 +82,14 @@ pub fn handle_key(state: ProjectState, projects: &[Project], key: KeyEvent) -> P
         // Move down through the list, wrapping at the end.
         KeyCode::Down => {
             let cur  = state.selected.unwrap_or(0);
-            let next = (cur + 1) % projects.len();
-            ProjectState { selected: Some(next) }
+            let next = (cur + 1) % reports.len();
+            ReportState { selected: Some(next) }
         }
         // Move up, wrapping at the top.
         KeyCode::Up => {
             let cur  = state.selected.unwrap_or(0);
-            let prev = cur.checked_sub(1).unwrap_or(projects.len() - 1);
-            ProjectState { selected: Some(prev) }
+            let prev = cur.checked_sub(1).unwrap_or(reports.len() - 1);
+            ReportState { selected: Some(prev) }
         }
         _ => state,
     }
@@ -97,11 +97,11 @@ pub fn handle_key(state: ProjectState, projects: &[Project], key: KeyEvent) -> P
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
-/// Render the full projects screen into `area`.
+/// Render the full reports screen into `area`.
 ///
 /// Splits `area` into a 30 % project list (left) and a 70 % stats pane
 /// (right). Pure function — draws from state, mutates nothing.
-pub fn render(frame: &mut Frame, area: Rect, projects: &[Project], state: &ProjectState) {
+pub fn render(frame: &mut Frame, area: Rect, reports: &[Report], state: &ReportState) {
     // 30/70 split mirrors the operator's mental model: the list is a narrow
     // index; the stats are the main reading surface.
     let cols = Layout::default()
@@ -109,23 +109,23 @@ pub fn render(frame: &mut Frame, area: Rect, projects: &[Project], state: &Proje
         .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(area);
 
-    render_list(frame, cols[0], projects, state);
-    render_stats(frame, cols[1], projects, state);
+    render_list(frame, cols[0], reports, state);
+    render_stats(frame, cols[1], reports, state);
 }
 
 /// Render the scrollable project list pane.
 ///
 /// The selected row is highlighted with `theme::selected()` (black on green).
 /// All others use standard text brightness so the selection stands out clearly.
-fn render_list(frame: &mut Frame, area: Rect, projects: &[Project], state: &ProjectState) {
-    let lines: Vec<Line> = if projects.is_empty() {
+fn render_list(frame: &mut Frame, area: Rect, reports: &[Report], state: &ReportState) {
+    let lines: Vec<Line> = if reports.is_empty() {
         // Empty-state message so the pane is never blank.
         vec![Line::from(Span::styled(
-            "  No projects found",
+            "  No reports found",
             theme::text_hint(),
         ))]
     } else {
-        projects
+        reports
             .iter()
             .enumerate()
             .map(|(i, p)| {
@@ -144,7 +144,7 @@ fn render_list(frame: &mut Frame, area: Rect, projects: &[Project], state: &Proj
     frame.render_widget(
         Paragraph::new(lines).block(
             Block::default()
-                .title(Span::styled(" PROJECTS ", theme::text_active()))
+                .title(Span::styled(" REPORTS ", theme::text_active()))
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(theme::border()),
@@ -158,10 +158,10 @@ fn render_list(frame: &mut Frame, area: Rect, projects: &[Project], state: &Proj
 /// Shows engagement metadata and artifact counters. Pressing Enter on a
 /// highlighted project opens the project context menu. When no project is
 /// selected the welcome prompt is shown instead.
-fn render_stats(frame: &mut Frame, area: Rect, projects: &[Project], state: &ProjectState) {
-    match state.selected.and_then(|i| projects.get(i)) {
+fn render_stats(frame: &mut Frame, area: Rect, reports: &[Report], state: &ReportState) {
+    match state.selected.and_then(|i| reports.get(i)) {
         None => {
-            // No project selected — show a welcome prompt.
+            // No report selected — show a welcome prompt.
             frame.render_widget(
                 Paragraph::new(vec![
                     Line::from(""),
@@ -235,7 +235,7 @@ fn render_stats(frame: &mut Frame, area: Rect, projects: &[Project], state: &Pro
 ///
 /// Both arguments are owned `String`s so the returned `Line` is `'static`
 /// (all spans use `Cow::Owned`). This sidesteps lifetime complexity when
-/// building lines inside a match arm that borrows from `projects`.
+/// building lines inside a match arm that borrows from `reports`.
 fn stat_line(label: &'static str, value: String) -> Line<'static> {
     Line::from(vec![
         Span::styled(label, theme::text_hint()),

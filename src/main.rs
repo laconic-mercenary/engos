@@ -45,7 +45,7 @@ fn main() -> std::io::Result<()> {
     // is absent or the operator declined to create the config dir — the TUI
     // handles an empty project list gracefully.
     let cfg          = config::load_config();
-    let projects     = cfg.projects;
+    let reports = cfg.reports;
     let orchestrators = config::load_models();
 
     // Install the panic hook so any panic restores the terminal before printing.
@@ -59,7 +59,7 @@ fn main() -> std::io::Result<()> {
     // created during the session can be appended and persisted.
     // Both lists are passed by value — AppState owns them so new entries created
     // during the session can be appended and persisted.
-    let result = tui::run(&mut terminal, &watch_path, projects, orchestrators);
+    let result = tui::run(&mut terminal, &watch_path, reports, orchestrators);
 
     // Always restore the terminal, even if run() returned an error.
     tui::exit(&mut terminal)?;

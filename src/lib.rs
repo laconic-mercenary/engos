@@ -24,23 +24,23 @@ pub mod theme;
 /// Configuration directory management and project data loading.
 pub mod config;
 
-/// Project data model, navigation state, and rendering.
-pub mod project;
+/// Report data model, navigation state, and rendering.
+pub mod report;
 
 /// Orchestrator model definitions loaded from `models.yml`.
 pub mod models;
 
-/// New Project form — state, key handling, and rendering.
-pub mod newproject;
+/// New Report form — state, key handling, and rendering.
+pub mod newreport;
 
 /// New Orchestrator form — configure and save a new LLM backend.
 pub mod neworch;
 
-/// Capabilities screen — project feature selection and local file writing.
+/// Capabilities screen — report feature selection and local file writing.
 pub mod capabilities;
 
-/// Project context menu — Open / Delete popup triggered from the project list.
-pub mod projectmenu;
+/// Report context menu — Open / Delete popup triggered from the report list.
+pub mod reportmenu;
 
 /// Game-style main menu — centred four-item landing screen.
 pub mod mainmenu;

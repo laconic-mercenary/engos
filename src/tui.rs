@@ -6,14 +6,14 @@
 use crate::capabilities::{self, CapabilitiesAction, CapabilitiesState};
 use crate::mainmenu::{self, MainMenuAction, MainMenuState};
 use crate::options::{self, OptionsAction, OptionsState};
-use crate::projectmenu::{self, ProjectMenuAction, ProjectMenuState};
+use crate::reportmenu::{self, ReportMenuAction, ReportMenuState};
 use crate::workspace::{self, ChatMessage, MessageRole, WorkspaceAction, WorkspaceState};
 use crate::config;
 use crate::help::{self, HelpState};
 use crate::models::{ModelConfig, Orchestrator};
 use crate::neworch::{self, NewOrchAction, NewOrchState};
-use crate::newproject::{self, NewProjectAction, NewProjectState, OrchestratorSelection};
-use crate::project::{self, Project, ProjectState};
+use crate::newreport::{self, NewReportAction, NewReportState, OrchestratorSelection};
+use crate::report::{self, Report, ReportState};
 use crate::theme;
 use crossterm::{
     event::{self, EnableBracketedPaste, DisableBracketedPaste, Event, KeyCode, KeyEvent, KeyModifiers},
@@ -42,8 +42,8 @@ pub enum Screen {
     MainMenu,
     /// Project list screen — reached via "Existing Report" on the main menu.
     Main,
-    ProjectMenu,
-    NewProject,
+    ReportMenu,
+    NewReport,
     NewOrchestrator,
     Capabilities,
     /// Active engagement workspace — shows the project name (full layout in a later phase).
@@ -64,15 +64,15 @@ pub struct AppState {
     pub screen:        Screen,
     pub main_menu:     MainMenuState,
     pub help:          HelpState,
-    /// Navigation cursor for the project list on the main screen.
-    pub proj:          ProjectState,
-    /// The live project list — grows when new projects are created.
-    pub projects:      Vec<Project>,
-    pub new_proj:      NewProjectState,
+    /// Navigation cursor for the report list on the main screen.
+    pub report_nav:    ReportState,
+    /// The live report list — grows when new reports are created.
+    pub reports:       Vec<Report>,
+    pub new_report:      NewReportState,
     pub new_orch:      NewOrchState,
     pub capabilities:  CapabilitiesState,
     /// State for the project context menu (Open / Delete).
-    pub project_menu:  ProjectMenuState,
+    pub report_menu:  ReportMenuState,
     /// The live orchestrator list — grows when new orchestrators are created.
     pub orchestrators: Vec<Orchestrator>,
     /// Active engagement workspace — populated before transitioning to Screen::Workspace.
@@ -81,20 +81,20 @@ pub struct AppState {
     pub options:       OptionsState,
 }
 
-pub fn initial_state(projects: Vec<Project>, orchestrators: Vec<Orchestrator>) -> AppState {
-    // Compute the nav cursor from the project list before moving it into AppState.
-    let proj = ProjectState::init(&projects);
+pub fn initial_state(reports: Vec<Report>, orchestrators: Vec<Orchestrator>) -> AppState {
+    // Compute the nav cursor from the report list before moving it into AppState.
+    let report_nav = ReportState::init(&reports);
     AppState {
         screen:       Screen::Splash,
         main_menu:    MainMenuState::default(),
         help:         HelpState::default(),
-        proj,
-        projects,
-        new_proj:     newproject::new_state(),
+        report_nav,
+        reports,
+        new_report:   newreport::new_state(),
         new_orch:     neworch::new_state(),
         capabilities: capabilities::new_state(),
-        // project_menu starts on index 0; it is always reset before use.
-        project_menu: projectmenu::new_state(0),
+        // report_menu starts on index 0; always reset before use.
+        report_menu: reportmenu::new_state(0),
         orchestrators,
         // workspace and options are populated before their screens are opened.
         workspace:    workspace::new_state(""),
@@ -135,10 +135,10 @@ pub fn install_panic_hook() {
 pub fn run(
     terminal: &mut Tui,
     _watch_path: &str, // Phase 3: launch the file watcher from here
-    projects: Vec<Project>,
+    reports: Vec<Report>,
     orchestrators: Vec<Orchestrator>,
 ) -> io::Result<()> {
-    let mut state = initial_state(projects, orchestrators);
+    let mut state = initial_state(reports, orchestrators);
 
     // Draw the initial frame before blocking on input.
     terminal.draw(|frame| render(frame, &state))?;
@@ -196,8 +196,8 @@ fn handle_key(state: AppState, key: KeyEvent) -> AppState {
         Screen::Splash          => handle_splash(state, key),
         Screen::MainMenu        => handle_main_menu(state, key),
         Screen::Main            => handle_main(state, key),
-        Screen::ProjectMenu     => handle_project_menu(state, key),
-        Screen::NewProject      => handle_new_project(state, key),
+        Screen::ReportMenu     => handle_project_menu(state, key),
+        Screen::NewReport      => handle_new_report(state, key),
         Screen::NewOrchestrator => handle_new_orch(state, key),
         Screen::Capabilities    => handle_capabilities(state, key),
         Screen::Workspace       => handle_workspace(state, key),
@@ -223,13 +223,13 @@ fn handle_main_menu(mut state: AppState, key: KeyEvent) -> AppState {
 
     match action {
         Some(MainMenuAction::NewReport) => {
-            state.new_proj = newproject::new_state();
-            state.screen   = Screen::NewProject;
+            state.new_report = newreport::new_state();
+            state.screen   = Screen::NewReport;
         }
         Some(MainMenuAction::ExistingReport) => {
             // Reset the project list cursor before entering so it is always
             // in a valid position regardless of deletions in a prior session.
-            state.proj   = project::ProjectState::init(&state.projects);
+            state.report_nav = report::ReportState::init(&state.reports);
             state.screen = Screen::Main;
         }
         Some(MainMenuAction::Options) => {
@@ -293,13 +293,13 @@ fn handle_main(mut state: AppState, key: KeyEvent) -> AppState {
         // Esc returns to the main menu from the project list.
         (KeyCode::Esc, _) => state.screen = Screen::MainMenu,
         (KeyCode::Up | KeyCode::Down, _) => {
-            state.proj = project::handle_key(state.proj, &state.projects, key);
+            state.report_nav = report::handle_key(state.report_nav, &state.reports, key);
         }
         // Enter on a highlighted project opens the context menu.
         (KeyCode::Enter, _) => {
-            if let Some(idx) = state.proj.selected {
-                state.project_menu = projectmenu::new_state(idx);
-                state.screen       = Screen::ProjectMenu;
+            if let Some(idx) = state.report_nav.selected {
+                state.report_menu = reportmenu::new_state(idx);
+                state.screen       = Screen::ReportMenu;
             }
         }
         _ => {}
@@ -308,30 +308,30 @@ fn handle_main(mut state: AppState, key: KeyEvent) -> AppState {
 }
 
 fn handle_project_menu(mut state: AppState, key: KeyEvent) -> AppState {
-    let (next_menu, action) = projectmenu::handle_key(state.project_menu, key);
-    state.project_menu = next_menu;
+    let (next_menu, action) = reportmenu::handle_key(state.report_menu, key);
+    state.report_menu = next_menu;
 
     match action {
-        Some(ProjectMenuAction::Open(idx)) => {
-            let name = state.projects
+        Some(ReportMenuAction::Open(idx)) => {
+            let name = state.reports
                 .get(idx)
                 .map(|p| p.name.clone())
                 .unwrap_or_default();
             state.workspace = workspace::new_state(&name);
             state.screen    = Screen::Workspace;
         }
-        Some(ProjectMenuAction::Delete(idx)) => {
-            if idx < state.projects.len() {
+        Some(ReportMenuAction::Delete(idx)) => {
+            if idx < state.reports.len() {
                 // Capture the directory path BEFORE removing from the list —
                 // once removed the name is gone.
                 let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
                 let project_dir = format!(
-                    "{home}/.engos/projects/{}",
-                    state.projects[idx].name
+                    "{home}/.engos/reports/{}",
+                    state.reports[idx].name
                 );
 
-                state.projects.remove(idx);
-                config::persist_config(&state.projects);
+                state.reports.remove(idx);
+                config::persist_config(&state.reports);
 
                 // Remove the project directory and all its contents.
                 // Failure is logged but does not abort — the project is
@@ -347,20 +347,20 @@ fn handle_project_menu(mut state: AppState, key: KeyEvent) -> AppState {
                 }
             }
             // Update the nav cursor so it stays in bounds after removal.
-            let new_selected = if state.projects.is_empty() {
+            let new_selected = if state.reports.is_empty() {
                 None
-            } else if idx >= state.projects.len() {
+            } else if idx >= state.reports.len() {
                 // Removed the last item — move cursor to the new last.
-                Some(state.projects.len() - 1)
+                Some(state.reports.len() - 1)
             } else {
                 // Item removed from the middle — cursor stays at same index
                 // which now points to the next project.
                 Some(idx)
             };
-            state.proj   = ProjectState { selected: new_selected };
+            state.report_nav = ReportState { selected: new_selected };
             state.screen = Screen::Main;
         }
-        Some(ProjectMenuAction::Close) => {
+        Some(ReportMenuAction::Close) => {
             state.screen = Screen::Main;
         }
         None => {}
@@ -369,20 +369,20 @@ fn handle_project_menu(mut state: AppState, key: KeyEvent) -> AppState {
     state
 }
 
-fn handle_new_project(mut state: AppState, key: KeyEvent) -> AppState {
-    let (next_form, action) = newproject::handle_key(state.new_proj, &state.orchestrators, key);
-    state.new_proj = next_form;
+fn handle_new_report(mut state: AppState, key: KeyEvent) -> AppState {
+    let (next_form, action) = newreport::handle_key(state.new_report, &state.orchestrators, key);
+    state.new_report = next_form;
 
     match action {
-        Some(NewProjectAction::Cancel) => {
-            state.new_proj = newproject::new_state();
+        Some(NewReportAction::Cancel) => {
+            state.new_report = newreport::new_state();
             state.screen   = Screen::MainMenu;
         }
-        Some(NewProjectAction::OpenNewOrchestrator) => {
+        Some(NewReportAction::OpenNewOrchestrator) => {
             state.new_orch = neworch::new_state();
             state.screen   = Screen::NewOrchestrator;
         }
-        Some(NewProjectAction::Next) => {
+        Some(NewReportAction::Next) => {
             // Reset capabilities to defaults before showing the screen.
             state.capabilities = capabilities::new_state();
             state.screen       = Screen::Capabilities;
@@ -401,10 +401,10 @@ fn handle_new_orch(mut state: AppState, key: KeyEvent) -> AppState {
         Some(NewOrchAction::Save(orch)) => {
             state.orchestrators.push(orch);
             persist_models(&state.orchestrators);
-            state.screen = Screen::NewProject;
+            state.screen = Screen::NewReport;
         }
         Some(NewOrchAction::Cancel) => {
-            state.screen = Screen::NewProject;
+            state.screen = Screen::NewReport;
         }
         None => {}
     }
@@ -423,15 +423,15 @@ fn handle_capabilities(mut state: AppState, key: KeyEvent) -> AppState {
 
             // Write project-local config files.
             capabilities::write_project_files(
-                &state.new_proj.dir_confirmed,
+                &state.new_report.dir_confirmed,
                 &state.capabilities,
                 &orch_name,
                 &orch_vendor,
             );
 
             // Capture the name before it is moved into the Project struct.
-            let project_name: String = state.new_proj.name_chars.iter().collect();
-            let new_project = Project {
+            let project_name: String = state.new_report.name_chars.iter().collect();
+            let new_report = Report {
                 name:                  project_name.clone(),
                 start_datetime:        current_timestamp(),
                 specialist_model:      orch_name,
@@ -440,24 +440,24 @@ fn handle_capabilities(mut state: AppState, key: KeyEvent) -> AppState {
                 last_opened:           None,
                 last_modified:         None,
             };
-            state.projects.push(new_project);
+            state.reports.push(new_report);
 
             // Select the newly created project in the main screen list.
-            state.proj = ProjectState { selected: Some(state.projects.len() - 1) };
+            state.report_nav = ReportState { selected: Some(state.reports.len() - 1) };
 
             // Persist the updated project list to ~/.engos/config.yml.
-            config::persist_config(&state.projects);
+            config::persist_config(&state.reports);
 
             // Open the workspace for the newly created project.
             state.workspace    = workspace::new_state(&project_name);
-            state.new_proj     = newproject::new_state();
+            state.new_report     = newreport::new_state();
             state.capabilities = capabilities::new_state();
             state.screen       = Screen::Workspace;
         }
         Some(CapabilitiesAction::Cancel) => {
             // Return to the New Project form without discarding its state —
             // the operator may want to change their orchestrator or name.
-            state.screen = Screen::NewProject;
+            state.screen = Screen::NewReport;
         }
         None => {}
     }
@@ -478,7 +478,7 @@ fn handle_help(mut state: AppState, key: KeyEvent) -> AppState {
 
 /// Resolve the selected orchestrator's name and vendor from `AppState`.
 fn resolve_orchestrator(state: &AppState) -> (String, String) {
-    match &state.new_proj.orch_sel {
+    match &state.new_report.orch_sel {
         OrchestratorSelection::Selected(i) => {
             if let Some(o) = state.orchestrators.get(*i) {
                 return (o.name.clone(), o.vendor.clone());
@@ -555,21 +555,21 @@ fn render(frame: &mut ratatui::Frame, state: &AppState) {
         Screen::Splash   => render_splash(frame),
         Screen::MainMenu => mainmenu::render(frame, frame.area(), &state.main_menu),
         Screen::Main     => render_main(frame, state),
-        Screen::ProjectMenu => {
+        Screen::ReportMenu => {
             render_main(frame, state);
-            let name = state.projects
-                .get(state.project_menu.project_idx)
+            let name = state.reports
+                .get(state.report_menu.report_idx)
                 .map(|p| p.name.as_str())
-                .unwrap_or("Project");
-            projectmenu::render(frame, frame.area(), &state.project_menu, name);
+                .unwrap_or("Report");
+            reportmenu::render(frame, frame.area(), &state.report_menu, name);
         }
-        Screen::NewProject => {
+        Screen::NewReport => {
             render_main(frame, state);
-            newproject::render(frame, frame.area(), &state.new_proj, &state.orchestrators);
+            newreport::render(frame, frame.area(), &state.new_report, &state.orchestrators);
         }
         Screen::NewOrchestrator => {
             render_main(frame, state);
-            newproject::render(frame, frame.area(), &state.new_proj, &state.orchestrators);
+            newreport::render(frame, frame.area(), &state.new_report, &state.orchestrators);
             neworch::render(frame, frame.area(), &state.new_orch);
         }
         Screen::Capabilities => {
@@ -618,7 +618,7 @@ fn render_splash(frame: &mut ratatui::Frame) {
 }
 
 fn render_main(frame: &mut ratatui::Frame, state: &AppState) {
-    project::render(frame, frame.area(), &state.projects, &state.proj);
+    report::render(frame, frame.area(), &state.reports, &state.report_nav);
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {

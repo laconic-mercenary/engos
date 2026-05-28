@@ -16,7 +16,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::models::{ModelConfig, Orchestrator};
-use crate::project::Project;
+use crate::report::Report;
 
 // ── Top-level config structure ────────────────────────────────────────────────
 
@@ -29,7 +29,7 @@ use crate::project::Project;
 pub struct Config {
     /// List of engagement projects shown on the main screen.
     #[serde(default)]
-    pub projects: Vec<Project>,
+    pub reports: Vec<Report>,
 }
 
 // ── Directory helpers ─────────────────────────────────────────────────────────
@@ -140,12 +140,12 @@ pub fn load_config() -> Config {
 /// Called after a new project is created so the next session sees it. Failures
 /// are logged to stderr but do not crash the tool — the in-memory state is
 /// already correct for the rest of this session.
-pub fn persist_config(projects: &[Project]) {
+pub fn persist_config(reports: &[Report]) {
     let Some(path) = config_path() else {
         eprintln!("warning: could not determine config path; project not saved");
         return;
     };
-    let cfg = Config { projects: projects.to_vec() };
+    let cfg = Config { reports: reports.to_vec() };
     match serde_yml::to_string(&cfg) {
         Ok(yaml) => {
             if let Err(e) = fs::write(&path, yaml) {
@@ -206,7 +206,7 @@ orchestrators:
 const EXAMPLE_CONFIG_YML: &str = r#"# engos configuration
 # Reference: https://github.com/your-org/engos
 
-projects:
+reports:
   - name: Acme Corp Red Team
     start_datetime: "2026-05-14T09:00:00+09:00"
     specialist_model: anthropic claude-opus-4-7

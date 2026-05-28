@@ -32,11 +32,82 @@ pub struct HelpTopic {
 ///
 /// The index of each entry here matches the `topic` field of
 /// [`MenuAction::Help`] — keep them in sync when adding topics.
-pub const TOPICS: &[HelpTopic] = &[HelpTopic {
-    title: "First Time Users",
-    // Placeholder content — replace with real onboarding text before the demo.
-    content: "asdfasdf",
-}];
+pub const TOPICS: &[HelpTopic] = &[
+    HelpTopic {
+        title: "First Time Users",
+        content:
+            "Welcome to Engos.\n\
+             \n\
+             Engos turns your engagement notes into polished bilingual reports \
+             without the grind. Here is how to get started:\n\
+             \n\
+             1. File > New Report — give the report a name and select a model.\n\
+             2. Choose your Report Artifacts (directory monitoring, copy-paste).\n\
+             3. Finish the wizard — the report workspace opens automatically.\n\
+             4. In the workspace, type commands or questions in the input box.\n\
+             \n\
+             Your reports are stored in ~/.engos/reports/ and listed on the \
+             main screen. Press Enter on any report to open or delete it.",
+    },
+    HelpTopic {
+        title: "Reports",
+        content:
+            "Each report corresponds to one red-team engagement.\n\
+             \n\
+             Reports are stored under ~/.engos/reports/<name>/ and contain:\n\
+             \n\
+             - local-config.yml   capability settings for this report\n\
+             - local-models.yml   the model selected at creation\n\
+             \n\
+             To create a report: File > New Report.\n\
+             To open a report:   highlight it and press Enter, then Open Report.\n\
+             To delete a report: highlight it, Enter, Delete Report.\n\
+             Deleting removes both the list entry and the report directory.",
+    },
+    HelpTopic {
+        title: "Models",
+        content:
+            "Models (orchestrators) are the LLM backends that power report \
+             generation.\n\
+             \n\
+             Available models are defined in ~/.engos/models.yml. To add a new \
+             model, open New Report and press Tab to reach the [ New ] button \
+             next to the Model dropdown. Enter a name, choose the vendor \
+             (Anthropic or Local), and provide your API key. The key is stored \
+             in the OS keychain — never written to any file on disk.\n\
+             \n\
+             Supported vendors:\n\
+             - Anthropic  claude-opus-4-7, claude-sonnet-4-5, etc.\n\
+             - Local      any Ollama-compatible endpoint (coming soon)",
+    },
+    HelpTopic {
+        title: "Keyboard Shortcuts",
+        content:
+            "Global\n\
+             \n\
+             m                Focus the menu bar\n\
+             Enter            Open / confirm\n\
+             Esc              Cancel / close\n\
+             Ctrl+C           Quit\n\
+             \n\
+             Report list\n\
+             \n\
+             ↑ ↓              Navigate reports\n\
+             Enter            Open context menu\n\
+             \n\
+             Workspace\n\
+             \n\
+             Enter            Submit command\n\
+             Ctrl+↑ / Ctrl+↓  Scroll chat history\n\
+             Esc              Close report (asks for confirmation)\n\
+             \n\
+             Dropdowns\n\
+             \n\
+             ↑ ↓              Navigate items\n\
+             Enter / Space    Confirm selection\n\
+             Esc              Close without selecting",
+    },
+];
 
 // ── State and actions ─────────────────────────────────────────────────────────
 

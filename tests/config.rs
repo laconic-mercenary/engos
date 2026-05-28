@@ -9,7 +9,7 @@ use engos::config::Config;
 #[test]
 fn parses_full_project() {
     let yaml = r#"
-projects:
+reports:
   - name: Test Engagement
     start_datetime: "2026-05-01T09:00:00+09:00"
     specialist_model: anthropic claude-opus-4-7
@@ -20,9 +20,9 @@ projects:
 "#;
 
     let cfg: Config = serde_yml::from_str(yaml).expect("should parse");
-    assert_eq!(cfg.projects.len(), 1);
+    assert_eq!(cfg.reports.len(), 1);
 
-    let p = &cfg.projects[0];
+    let p = &cfg.reports[0];
     assert_eq!(p.name,                 "Test Engagement");
     assert_eq!(p.start_datetime,       "2026-05-01T09:00:00+09:00");
     assert_eq!(p.specialist_model,     "anthropic claude-opus-4-7");
@@ -36,7 +36,7 @@ projects:
 #[test]
 fn optional_fields_default_to_none() {
     let yaml = r#"
-projects:
+reports:
   - name: Legacy Project
     start_datetime: "2026-01-01T00:00:00+00:00"
     specialist_model: local-model
@@ -45,7 +45,7 @@ projects:
 "#;
 
     let cfg: Config = serde_yml::from_str(yaml).expect("should parse");
-    let p = &cfg.projects[0];
+    let p = &cfg.reports[0];
 
     assert!(p.last_opened.is_none(),   "last_opened must default to None");
     assert!(p.last_modified.is_none(), "last_modified must default to None");
@@ -54,9 +54,9 @@ projects:
 /// An empty projects list parses without error.
 #[test]
 fn empty_projects_list_is_valid() {
-    let yaml = "projects: []\n";
+    let yaml = "reports: []\n";
     let cfg: Config = serde_yml::from_str(yaml).expect("should parse");
-    assert!(cfg.projects.is_empty());
+    assert!(cfg.reports.is_empty());
 }
 
 /// A config file with no projects key at all also parses — the field defaults.
@@ -64,7 +64,7 @@ fn empty_projects_list_is_valid() {
 fn missing_projects_key_defaults_to_empty() {
     let yaml = "# just a comment\n";
     let cfg: Config = serde_yml::from_str(yaml).expect("should parse");
-    assert!(cfg.projects.is_empty(), "missing projects key must give empty vec");
+    assert!(cfg.reports.is_empty(), "missing reports key must give empty vec");
 }
 
 /// The built-in seed YAML parses correctly — guards against typos in the constant.
@@ -74,7 +74,7 @@ fn seed_yaml_is_valid() {
     let seed = r#"# engos configuration
 # Reference: https://github.com/your-org/engos
 
-projects:
+reports:
   - name: Acme Corp Red Team
     start_datetime: "2026-05-14T09:00:00+09:00"
     specialist_model: anthropic claude-opus-4-7
@@ -93,7 +93,7 @@ projects:
 "#;
 
     let cfg: Config = serde_yml::from_str(seed).expect("seed YAML must parse");
-    assert_eq!(cfg.projects.len(), 2, "seed must contain exactly 2 projects");
-    assert_eq!(cfg.projects[0].name, "Acme Corp Red Team");
-    assert_eq!(cfg.projects[1].name, "TechCo Pentest Q2");
+    assert_eq!(cfg.reports.len(), 2, "seed must contain exactly 2 reports");
+    assert_eq!(cfg.reports[0].name, "Acme Corp Red Team");
+    assert_eq!(cfg.reports[1].name, "TechCo Pentest Q2");
 }

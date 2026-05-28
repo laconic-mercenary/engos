@@ -53,8 +53,8 @@ pub const MENU: &[MenuItem] = &[
     },
     MenuItem {
         label: "Help",
-        // Empty items list — Help is a direct-action entry. Pressing Enter on
-        // it fires MenuAction::Help(0) immediately without opening a dropdown.
+        // Direct-action entry — Enter opens the help screen at topic 0.
+        // Add items here if a sub-menu of topics is ever wanted.
         items: &[],
     },
 ];

@@ -1,7 +1,7 @@
 //! Project context menu — a small popup shown when the operator presses Enter
 //! on a highlighted project in the main screen list.
 //!
-//! Two items: Open Project and Delete Project.
+//! Two items: Open Report and Delete Report.
 //! Navigation: ↑/↓ or Tab/Shift+Tab. Enter or Space confirms. Esc closes.
 
 use crate::theme;
@@ -19,27 +19,27 @@ use ratatui::{
 ///
 /// Keeping them in a slice means the hover index maps directly to the item
 /// without any separate bookkeeping.
-const ITEMS: &[&str] = &["Open Project", "Delete Project"];
+const ITEMS: &[&str] = &["Open Report", "Delete Report"];
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-/// State for the project context menu.
+/// State for the report context menu.
 #[derive(Debug, Clone)]
-pub struct ProjectMenuState {
+pub struct ReportMenuState {
     /// Index into `projects` — the project this menu is acting on.
-    pub project_idx: usize,
+    pub report_idx: usize,
     /// Which menu item is currently highlighted (0..ITEMS.len()).
     pub hover: usize,
 }
 
 /// Build a fresh menu state targeting the given project.
-pub fn new_state(project_idx: usize) -> ProjectMenuState {
-    ProjectMenuState { project_idx, hover: 0 }
+pub fn new_state(report_idx: usize) -> ReportMenuState {
+    ReportMenuState { report_idx, hover: 0 }
 }
 
 /// An action the caller should handle after the menu resolves.
 #[derive(Debug, Clone, PartialEq)]
-pub enum ProjectMenuAction {
+pub enum ReportMenuAction {
     /// Open the selected project. No workspace screen yet — placeholder.
     Open(usize),
     /// Permanently delete the project from the list and from disk config.
@@ -52,9 +52,9 @@ pub enum ProjectMenuAction {
 
 /// Produce the next state and an optional action from a keypress.
 pub fn handle_key(
-    mut state: ProjectMenuState,
+    mut state: ReportMenuState,
     key: KeyEvent,
-) -> (ProjectMenuState, Option<ProjectMenuAction>) {
+) -> (ReportMenuState, Option<ReportMenuAction>) {
     match key.code {
         // ↓ / Tab — move to the next item, wrapping.
         KeyCode::Down | KeyCode::Tab => {
@@ -69,14 +69,14 @@ pub fn handle_key(
         // Enter or Space confirms the highlighted item.
         KeyCode::Enter | KeyCode::Char(' ') => {
             let action = match state.hover {
-                0 => ProjectMenuAction::Open(state.project_idx),
-                1 => ProjectMenuAction::Delete(state.project_idx),
+                0 => ReportMenuAction::Open(state.report_idx),
+                1 => ReportMenuAction::Delete(state.report_idx),
                 _ => unreachable!("hover index out of range for ITEMS"),
             };
             (state, Some(action))
         }
         // Esc closes without acting.
-        KeyCode::Esc => (state, Some(ProjectMenuAction::Close)),
+        KeyCode::Esc => (state, Some(ReportMenuAction::Close)),
         _ => (state, None),
     }
 }
@@ -87,7 +87,7 @@ pub fn handle_key(
 ///
 /// `project_name` is used as the popup title so the operator can see which
 /// project the actions will apply to.
-pub fn render(frame: &mut Frame, area: Rect, state: &ProjectMenuState, project_name: &str) {
+pub fn render(frame: &mut Frame, area: Rect, state: &ReportMenuState, project_name: &str) {
     // Size: wide enough for the longest item + margins; tall enough for the items.
     let popup_w = 26_u16.min(area.width);
     let popup_h = (ITEMS.len() as u16 + 4).min(area.height); // items + border + padding
