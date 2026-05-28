@@ -1,92 +1,185 @@
-//! Visual theme — the single source of truth for every colour used in the UI.
+//! Visual theme — the single source of truth for every colour and style in the UI.
 //!
-//! All colour values are named constants. No hex literals or `Color::Rgb` calls
-//! should appear anywhere else in the codebase — change a colour here and it
-//! propagates everywhere automatically.
+//! # Palette system
 //!
-//! # The palette
+//! A global atomic stores the active palette (Green / Blue / White / Red).
+//! All style constructors read it at call time, so [`set_palette`] takes effect
+//! on the very next render frame with no other code changes.
 //!
-//! Four brightness levels of the same green hue, matching the phosphor glow
-//! of the original Matrix rain sequence (#00FF41). Each level has a clear role:
+//! # Style constructors
 //!
-//! | Constant       | Role                                          |
-//! |----------------|-----------------------------------------------|
-//! | `GREEN`        | Primary text, focused borders, selection bg  |
-//! | `GREEN_DIM`    | Standard borders, secondary text             |
-//! | `GREEN_DARK`   | Inactive borders, subtle hints               |
-//! | `GREEN_FAINT`  | Barely-visible decoration, splash border     |
-//! | `BLACK`        | Foreground on highlighted items (inverted)   |
+//! Call these fresh each render frame — do not cache the returned `Style`.
+
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use ratatui::style::{Color, Modifier, Style};
 
-// ── Colour constants ──────────────────────────────────────────────────────────
+// ── Palette ───────────────────────────────────────────────────────────────────
 
-/// Matrix phosphor green — #00FF41.
-/// Use for active text, focused widget borders, and selection backgrounds.
-pub const GREEN: Color = Color::Rgb(0, 255, 65);
+/// One of the four supported colour palettes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Palette {
+    Green = 0,
+    Blue  = 1,
+    White = 2,
+    Red   = 3,
+}
 
-/// Medium green — softer than `GREEN` for extended reading.
-/// Use for standard body text and normal-state borders.
-pub const GREEN_DIM: Color = Color::Rgb(0, 200, 50);
+impl Palette {
+    /// Map a raw index back to a variant. Out-of-range values fall back to Green.
+    pub fn from_index(i: usize) -> Self {
+        match i {
+            1 => Palette::Blue,
+            2 => Palette::White,
+            3 => Palette::Red,
+            _ => Palette::Green,
+        }
+    }
+}
 
-/// Dark green — recedes into the background.
-/// Use for inactive borders and low-emphasis hints.
-pub const GREEN_DARK: Color = Color::Rgb(0, 100, 20);
+/// Human-readable names in display order, index-aligned with `Palette as usize`.
+pub const PALETTE_NAMES: &[&str] = &["Green", "Blue", "White", "Red"];
 
-/// Very faint green — barely perceptible glow.
-/// Use for decorative borders (e.g. the splash box) that should not draw
-/// attention away from the content.
-pub const GREEN_FAINT: Color = Color::Rgb(0, 50, 10);
+/// Active palette — written once at startup and whenever the operator changes
+/// it in Options. `Relaxed` ordering is sufficient; no data depends on this
+/// value across threads.
+static CURRENT_PALETTE: AtomicU8 = AtomicU8::new(0);
 
-/// Pure black — the foreground colour when an item is highlighted.
-/// Inverted against `GREEN` gives maximum contrast for selections.
-pub const BLACK: Color = Color::Black;
+/// Switch to the given palette. Takes effect on the next render frame.
+pub fn set_palette(p: Palette) {
+    CURRENT_PALETTE.store(p as u8, Ordering::Relaxed);
+}
+
+/// Return the currently active palette.
+pub fn current_palette() -> Palette {
+    Palette::from_index(CURRENT_PALETTE.load(Ordering::Relaxed) as usize)
+}
+
+// ── Colour constants — one set per palette ────────────────────────────────────
+//
+// Four brightness levels with consistent roles across every palette:
+//   BRIGHT → primary accent / active text / selection background
+//   NORMAL → readable body text
+//   DIM    → borders, inactive elements, secondary hints
+//   FAINT  → barely-visible decoration (splash border, etc.)
+
+// Green — Matrix phosphor (default)
+const G_BRIGHT: Color = Color::Rgb(  0, 255,  65);
+const G_NORMAL: Color = Color::Rgb(  0, 200,  50);
+const G_DIM:    Color = Color::Rgb(  0, 100,  20);
+const G_FAINT:  Color = Color::Rgb(  0,  50,  10);
+
+// Blue — deep-sky blue
+const B_BRIGHT: Color = Color::Rgb(  0, 191, 255);
+const B_NORMAL: Color = Color::Rgb(  0, 150, 200);
+const B_DIM:    Color = Color::Rgb(  1,  79, 134);
+const B_FAINT:  Color = Color::Rgb(  0,  37,  58);
+
+// White — greyscale
+const W_BRIGHT: Color = Color::Rgb(255, 255, 255);
+const W_NORMAL: Color = Color::Rgb(160, 160, 160);
+const W_DIM:    Color = Color::Rgb( 80,  80,  80);
+const W_FAINT:  Color = Color::Rgb( 32,  32,  32);
+
+// Red — warm red
+const R_BRIGHT: Color = Color::Rgb(255,  68,  68);
+const R_NORMAL: Color = Color::Rgb(200,  40,  40);
+const R_DIM:    Color = Color::Rgb(120,   0,   0);
+const R_FAINT:  Color = Color::Rgb( 48,   0,   0);
+
+// Black — foreground for inverted items; palette-independent.
+const BLACK: Color = Color::Black;
+
+// ── Palette-derived colour accessors ─────────────────────────────────────────
+
+fn bright() -> Color {
+    match current_palette() {
+        Palette::Green => G_BRIGHT,
+        Palette::Blue  => B_BRIGHT,
+        Palette::White => W_BRIGHT,
+        Palette::Red   => R_BRIGHT,
+    }
+}
+
+fn normal() -> Color {
+    match current_palette() {
+        Palette::Green => G_NORMAL,
+        Palette::Blue  => B_NORMAL,
+        Palette::White => W_NORMAL,
+        Palette::Red   => R_NORMAL,
+    }
+}
+
+fn dim() -> Color {
+    match current_palette() {
+        Palette::Green => G_DIM,
+        Palette::Blue  => B_DIM,
+        Palette::White => W_DIM,
+        Palette::Red   => R_DIM,
+    }
+}
+
+fn faint() -> Color {
+    match current_palette() {
+        Palette::Green => G_FAINT,
+        Palette::Blue  => B_FAINT,
+        Palette::White => W_FAINT,
+        Palette::Red   => R_FAINT,
+    }
+}
 
 // ── Style constructors ────────────────────────────────────────────────────────
-//
-// These are free functions, not methods — call sites compose styles from these
-// building blocks rather than reaching for raw Color values.
 
-/// Primary text — medium green, readable on a black background.
+/// Primary text — readable body text.
 pub fn text() -> Style {
-    Style::default().fg(GREEN_DIM)
+    Style::default().fg(normal())
 }
 
-/// Focused / active text — bright green, draws the eye.
+/// Focused / active text — draws the eye; used for titles and active items.
 pub fn text_active() -> Style {
-    Style::default().fg(GREEN).add_modifier(Modifier::BOLD)
+    Style::default().fg(bright()).add_modifier(Modifier::BOLD)
 }
 
-/// Dim hint text — dark green, present but not demanding.
+/// Dim hint text — present but receding; used for labels and secondary info.
 pub fn text_hint() -> Style {
-    Style::default().fg(GREEN_DARK)
+    Style::default().fg(dim())
 }
 
-/// Selected item — black text on bright green; maximum contrast.
-/// Used for the highlighted row in dropdowns and lists.
+/// Selected item — inverted: black text on bright accent background.
 pub fn selected() -> Style {
-    Style::default().fg(BLACK).bg(GREEN)
+    Style::default().fg(BLACK).bg(bright())
 }
 
-/// Standard widget border — dark green, visible but not dominant.
+/// Standard widget border — dim; visible but not dominant.
 pub fn border() -> Style {
-    Style::default().fg(GREEN_DARK)
+    Style::default().fg(dim())
 }
 
-/// Focused widget border — bright green, clearly signals active state.
+/// Focused widget border — bright; clearly signals the active widget.
 pub fn border_active() -> Style {
-    Style::default().fg(GREEN)
+    Style::default().fg(bright())
 }
 
-/// Splash screen border — very faint green, frames without competing.
+/// Splash screen border — very faint; frames without competing.
 pub fn border_splash() -> Style {
-    Style::default().fg(GREEN_FAINT)
+    Style::default().fg(faint())
 }
 
-/// Validation error — red text, universally understood as an error signal.
-///
-/// The only non-green colour in the palette; reserved strictly for errors so
-/// operators notice it immediately without it becoming visual noise.
+/// Validation error — always a distinct red regardless of the active palette
+/// so errors are immediately recognisable against any accent colour.
 pub fn error() -> Style {
-    Style::default().fg(Color::Red)
+    Style::default().fg(Color::Rgb(255, 70, 70))
+}
+
+// ── Palette utilities ─────────────────────────────────────────────────────────
+
+/// Return the bright accent colour for a specific palette without changing the
+/// active one. Used by the options screen to render colour swatches.
+pub fn palette_bright_color(p: Palette) -> Color {
+    match p {
+        Palette::Green => G_BRIGHT,
+        Palette::Blue  => B_BRIGHT,
+        Palette::White => W_BRIGHT,
+        Palette::Red   => R_BRIGHT,
+    }
 }

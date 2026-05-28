@@ -4,17 +4,19 @@
 //!   render(state) → wait for key → handle_key(state, key) → state → repeat.
 
 use crate::capabilities::{self, CapabilitiesAction, CapabilitiesState};
+use crate::mainmenu::{self, MainMenuAction, MainMenuState};
+use crate::options::{self, OptionsAction, OptionsState};
 use crate::projectmenu::{self, ProjectMenuAction, ProjectMenuState};
+use crate::workspace::{self, ChatMessage, MessageRole, WorkspaceAction, WorkspaceState};
 use crate::config;
 use crate::help::{self, HelpState};
-use crate::menu::{self, MenuAction, MenuState};
 use crate::models::{ModelConfig, Orchestrator};
 use crate::neworch::{self, NewOrchAction, NewOrchState};
 use crate::newproject::{self, NewProjectAction, NewProjectState, OrchestratorSelection};
 use crate::project::{self, Project, ProjectState};
 use crate::theme;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{self, EnableBracketedPaste, DisableBracketedPaste, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -36,11 +38,18 @@ pub type Tui = Terminal<CrosstermBackend<Stdout>>;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
     Splash,
+    /// Game-style landing menu (New Report / Existing Report / Options / Exit).
+    MainMenu,
+    /// Project list screen — reached via "Existing Report" on the main menu.
     Main,
     ProjectMenu,
     NewProject,
     NewOrchestrator,
     Capabilities,
+    /// Active engagement workspace — shows the project name (full layout in a later phase).
+    Workspace,
+    /// Application options — appearance palette selection, etc.
+    Options,
     Help,
     Quit,
 }
@@ -53,7 +62,7 @@ pub enum Screen {
 /// produces a fresh state without any hidden mutation.
 pub struct AppState {
     pub screen:        Screen,
-    pub menu:          MenuState,
+    pub main_menu:     MainMenuState,
     pub help:          HelpState,
     /// Navigation cursor for the project list on the main screen.
     pub proj:          ProjectState,
@@ -66,6 +75,10 @@ pub struct AppState {
     pub project_menu:  ProjectMenuState,
     /// The live orchestrator list — grows when new orchestrators are created.
     pub orchestrators: Vec<Orchestrator>,
+    /// Active engagement workspace — populated before transitioning to Screen::Workspace.
+    pub workspace:     WorkspaceState,
+    /// Options screen state — refreshed from the active palette each time Options opens.
+    pub options:       OptionsState,
 }
 
 pub fn initial_state(projects: Vec<Project>, orchestrators: Vec<Orchestrator>) -> AppState {
@@ -73,7 +86,7 @@ pub fn initial_state(projects: Vec<Project>, orchestrators: Vec<Orchestrator>) -
     let proj = ProjectState::init(&projects);
     AppState {
         screen:       Screen::Splash,
-        menu:         MenuState::default(),
+        main_menu:    MainMenuState::default(),
         help:         HelpState::default(),
         proj,
         projects,
@@ -83,6 +96,9 @@ pub fn initial_state(projects: Vec<Project>, orchestrators: Vec<Orchestrator>) -
         // project_menu starts on index 0; it is always reset before use.
         project_menu: projectmenu::new_state(0),
         orchestrators,
+        // workspace and options are populated before their screens are opened.
+        workspace:    workspace::new_state(""),
+        options:      options::new_state(),
     }
 }
 
@@ -91,13 +107,16 @@ pub fn initial_state(projects: Vec<Project>, orchestrators: Vec<Orchestrator>) -
 pub fn enter() -> io::Result<Tui> {
     enable_raw_mode()?;
     let mut out = stdout();
-    execute!(out, EnterAlternateScreen)?;
+    // EnableBracketedPaste tells the terminal to wrap pasted content in escape
+    // sequences so it arrives as Event::Paste(String) rather than individual
+    // keystrokes. Terminals that don't support it silently ignore the sequence.
+    execute!(out, EnterAlternateScreen, EnableBracketedPaste)?;
     Terminal::new(CrosstermBackend::new(stdout()))
 }
 
 pub fn exit(terminal: &mut Tui) -> io::Result<()> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableBracketedPaste)?;
     terminal.show_cursor()?;
     Ok(())
 }
@@ -106,7 +125,7 @@ pub fn install_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
-        let _ = execute!(stdout(), LeaveAlternateScreen);
+        let _ = execute!(stdout(), LeaveAlternateScreen, DisableBracketedPaste);
         previous(info);
     }));
 }
@@ -115,14 +134,14 @@ pub fn install_panic_hook() {
 
 pub fn run(
     terminal: &mut Tui,
-    watch_path: &str,
+    _watch_path: &str, // Phase 3: launch the file watcher from here
     projects: Vec<Project>,
     orchestrators: Vec<Orchestrator>,
 ) -> io::Result<()> {
     let mut state = initial_state(projects, orchestrators);
 
     // Draw the initial frame before blocking on input.
-    terminal.draw(|frame| render(frame, &state, watch_path))?;
+    terminal.draw(|frame| render(frame, &state))?;
 
     while !matches!(state.screen, Screen::Quit) {
         // Block until a terminal event arrives — no timeout, near-zero CPU idle.
@@ -141,15 +160,21 @@ pub fn run(
                 // Only redraw after state actually changes — skip the draw
                 // if we're about to exit anyway.
                 if !matches!(state.screen, Screen::Quit) {
-                    terminal.draw(|frame| render(frame, &state, watch_path))?;
+                    terminal.draw(|frame| render(frame, &state))?;
                 }
+            }
+            // Bracketed paste — only processed when the workspace is open.
+            // Other screens ignore the event so paste text doesn't leak into
+            // menus or forms unexpectedly.
+            Event::Paste(text) => {
+                state = handle_paste(state, text);
+                terminal.draw(|frame| render(frame, &state))?;
             }
             // Resize events require a forced redraw so the layout recalculates
             // for the new terminal dimensions.
             Event::Resize(_, _) => {
-                terminal.draw(|frame| render(frame, &state, watch_path))?;
+                terminal.draw(|frame| render(frame, &state))?;
             }
-            // Mouse, focus, paste, and other events are not yet handled.
             _ => {}
         }
     }
@@ -160,13 +185,23 @@ pub fn run(
 // ── Key handling ──────────────────────────────────────────────────────────────
 
 fn handle_key(state: AppState, key: KeyEvent) -> AppState {
+    // Global hard-quit: Ctrl+C exits from any screen without going through menus.
+    if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
+        let mut s = state;
+        s.screen = Screen::Quit;
+        return s;
+    }
+
     match state.screen.clone() {
         Screen::Splash          => handle_splash(state, key),
+        Screen::MainMenu        => handle_main_menu(state, key),
         Screen::Main            => handle_main(state, key),
         Screen::ProjectMenu     => handle_project_menu(state, key),
         Screen::NewProject      => handle_new_project(state, key),
         Screen::NewOrchestrator => handle_new_orch(state, key),
         Screen::Capabilities    => handle_capabilities(state, key),
+        Screen::Workspace       => handle_workspace(state, key),
+        Screen::Options         => handle_options(state, key),
         Screen::Help            => handle_help(state, key),
         Screen::Quit            => state,
     }
@@ -177,46 +212,97 @@ fn handle_splash(mut state: AppState, key: KeyEvent) -> AppState {
         (KeyCode::Char('c'), KeyModifiers::CONTROL) | (KeyCode::Char('q'), _) => {
             state.screen = Screen::Quit;
         }
-        _ => state.screen = Screen::Main,
+        _ => state.screen = Screen::MainMenu,
+    }
+    state
+}
+
+fn handle_main_menu(mut state: AppState, key: KeyEvent) -> AppState {
+    let (next, action) = mainmenu::handle_key(state.main_menu, key);
+    state.main_menu = next;
+
+    match action {
+        Some(MainMenuAction::NewReport) => {
+            state.new_proj = newproject::new_state();
+            state.screen   = Screen::NewProject;
+        }
+        Some(MainMenuAction::ExistingReport) => {
+            // Reset the project list cursor before entering so it is always
+            // in a valid position regardless of deletions in a prior session.
+            state.proj   = project::ProjectState::init(&state.projects);
+            state.screen = Screen::Main;
+        }
+        Some(MainMenuAction::Options) => {
+            // Refresh options state from the current palette before opening.
+            state.options = options::new_state();
+            state.screen  = Screen::Options;
+        }
+        Some(MainMenuAction::Help) => {
+            state.help   = HelpState::default();
+            state.screen = Screen::Help;
+        }
+        Some(MainMenuAction::Quit) => state.screen = Screen::Quit,
+        None => {}
+    }
+
+    state
+}
+
+fn handle_workspace(mut state: AppState, key: KeyEvent) -> AppState {
+    let (next, action) = workspace::handle_key(state.workspace, key);
+    state.workspace = next;
+    if let Some(WorkspaceAction::Close) = action {
+        state.screen = Screen::MainMenu;
+    }
+    state
+}
+
+/// Handle a bracketed-paste event.
+///
+/// Only active when the workspace is open. The pasted content becomes a new
+/// artifact: the counter increments, a log entry is written, and a system
+/// message appears in the chat history so the operator has visual confirmation.
+/// Any other screen silently drops the event.
+fn handle_paste(mut state: AppState, text: String) -> AppState {
+    if matches!(state.screen, Screen::Workspace) {
+        let char_count = text.chars().count();
+        state.workspace.artifacts_processed += 1;
+        state.workspace.logs.push(format!("paste artifact  {char_count} chars"));
+        state.workspace.chat_history.push(ChatMessage {
+            role: MessageRole::Model,
+            text: format!("paste artifact received \u{2014} {char_count} chars"),
+        });
+        // Bring the confirmation message into view.
+        state.workspace.chat_scroll = 0;
+    }
+    state
+}
+
+fn handle_options(mut state: AppState, key: KeyEvent) -> AppState {
+    let (next, action) = options::handle_key(state.options, key);
+    state.options = next;
+    if let Some(OptionsAction::Close) = action {
+        state.screen = Screen::MainMenu;
     }
     state
 }
 
 fn handle_main(mut state: AppState, key: KeyEvent) -> AppState {
-    if state.menu.focused {
-        let (next_menu, action) = menu::handle_key(state.menu, key);
-        state.menu = next_menu;
-
-        match action {
-            Some(MenuAction::Quit) => state.screen = Screen::Quit,
-            Some(MenuAction::NewProject) => {
-                state.new_proj = newproject::new_state();
-                state.screen   = Screen::NewProject;
-            }
-            Some(MenuAction::Help(topic)) => {
-                state.help   = HelpState { selected: topic };
-                state.screen = Screen::Help;
-            }
-            None => {}
+    match (key.code, key.modifiers) {
+        (KeyCode::Char('q'), _) => state.screen = Screen::Quit,
+        // Esc returns to the main menu from the project list.
+        (KeyCode::Esc, _) => state.screen = Screen::MainMenu,
+        (KeyCode::Up | KeyCode::Down, _) => {
+            state.proj = project::handle_key(state.proj, &state.projects, key);
         }
-    } else {
-        match (key.code, key.modifiers) {
-            (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                state.screen = Screen::Quit;
+        // Enter on a highlighted project opens the context menu.
+        (KeyCode::Enter, _) => {
+            if let Some(idx) = state.proj.selected {
+                state.project_menu = projectmenu::new_state(idx);
+                state.screen       = Screen::ProjectMenu;
             }
-            (KeyCode::Char('m'), _) => state.menu = menu::focus(state.menu),
-            (KeyCode::Up | KeyCode::Down, _) => {
-                state.proj = project::handle_key(state.proj, &state.projects, key);
-            }
-            // Enter on a highlighted project opens the context menu.
-            (KeyCode::Enter, _) => {
-                if let Some(idx) = state.proj.selected {
-                    state.project_menu = projectmenu::new_state(idx);
-                    state.screen       = Screen::ProjectMenu;
-                }
-            }
-            _ => {}
         }
+        _ => {}
     }
     state
 }
@@ -226,9 +312,13 @@ fn handle_project_menu(mut state: AppState, key: KeyEvent) -> AppState {
     state.project_menu = next_menu;
 
     match action {
-        Some(ProjectMenuAction::Open(_idx)) => {
-            // Workspace screen not yet built — close the menu and return to Main.
-            state.screen = Screen::Main;
+        Some(ProjectMenuAction::Open(idx)) => {
+            let name = state.projects
+                .get(idx)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            state.workspace = workspace::new_state(&name);
+            state.screen    = Screen::Workspace;
         }
         Some(ProjectMenuAction::Delete(idx)) => {
             if idx < state.projects.len() {
@@ -286,7 +376,7 @@ fn handle_new_project(mut state: AppState, key: KeyEvent) -> AppState {
     match action {
         Some(NewProjectAction::Cancel) => {
             state.new_proj = newproject::new_state();
-            state.screen   = Screen::Main;
+            state.screen   = Screen::MainMenu;
         }
         Some(NewProjectAction::OpenNewOrchestrator) => {
             state.new_orch = neworch::new_state();
@@ -339,16 +429,16 @@ fn handle_capabilities(mut state: AppState, key: KeyEvent) -> AppState {
                 &orch_vendor,
             );
 
-            // Build the new project entry and append it to the in-memory list.
+            // Capture the name before it is moved into the Project struct.
             let project_name: String = state.new_proj.name_chars.iter().collect();
             let new_project = Project {
-                name:                 project_name,
-                start_datetime:       current_timestamp(),
-                specialist_model:     orch_name,
-                artifacts_collected:  0,
+                name:                  project_name.clone(),
+                start_datetime:        current_timestamp(),
+                specialist_model:      orch_name,
+                artifacts_collected:   0,
                 artifacts_synthesized: 0,
-                last_opened:          None,
-                last_modified:        None,
+                last_opened:           None,
+                last_modified:         None,
             };
             state.projects.push(new_project);
 
@@ -358,10 +448,11 @@ fn handle_capabilities(mut state: AppState, key: KeyEvent) -> AppState {
             // Persist the updated project list to ~/.engos/config.yml.
             config::persist_config(&state.projects);
 
-            // Reset both creation forms and return to Main.
-            state.new_proj    = newproject::new_state();
+            // Open the workspace for the newly created project.
+            state.workspace    = workspace::new_state(&project_name);
+            state.new_proj     = newproject::new_state();
             state.capabilities = capabilities::new_state();
-            state.screen       = Screen::Main;
+            state.screen       = Screen::Workspace;
         }
         Some(CapabilitiesAction::Cancel) => {
             // Return to the New Project form without discarding its state —
@@ -378,7 +469,7 @@ fn handle_help(mut state: AppState, key: KeyEvent) -> AppState {
     let (next_help, action) = help::handle_key(state.help, key);
     state.help = next_help;
     if let Some(help::HelpAction::Close) = action {
-        state.screen = Screen::Main;
+        state.screen = Screen::MainMenu;
     }
     state
 }
@@ -459,10 +550,11 @@ fn persist_models(orchestrators: &[Orchestrator]) {
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
-fn render(frame: &mut ratatui::Frame, state: &AppState, watch_path: &str) {
+fn render(frame: &mut ratatui::Frame, state: &AppState) {
     match &state.screen {
-        Screen::Splash => render_splash(frame, watch_path),
-        Screen::Main   => render_main(frame, state),
+        Screen::Splash   => render_splash(frame),
+        Screen::MainMenu => mainmenu::render(frame, frame.area(), &state.main_menu),
+        Screen::Main     => render_main(frame, state),
         Screen::ProjectMenu => {
             render_main(frame, state);
             let name = state.projects
@@ -484,15 +576,17 @@ fn render(frame: &mut ratatui::Frame, state: &AppState, watch_path: &str) {
             render_main(frame, state);
             capabilities::render(frame, frame.area(), &state.capabilities);
         }
+        Screen::Workspace => workspace::render(frame, frame.area(), &state.workspace),
+        Screen::Options   => options::render(frame, frame.area(), &state.options),
         Screen::Help => help::render(frame, frame.area(), &state.help),
         Screen::Quit => {}
     }
 }
 
-fn render_splash(frame: &mut ratatui::Frame, watch_path: &str) {
+fn render_splash(frame: &mut ratatui::Frame) {
     let area  = frame.area();
     let box_w = 52_u16.min(area.width);
-    let box_h = 14_u16.min(area.height);
+    let box_h = 12_u16.min(area.height);
     let sa    = centered_rect(box_w, box_h, area);
 
     frame.render_widget(Clear, sa);
@@ -505,11 +599,6 @@ fn render_splash(frame: &mut ratatui::Frame, watch_path: &str) {
             Line::from(Span::styled(format!("  Engagement OS  v{version}"), theme::text_hint())),
             Line::from(""),
             Line::from(Span::styled("  Red team reporting assistant", theme::text())),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("  Watching  ", theme::text_hint()),
-                Span::styled(watch_path, theme::text_active()),
-            ]),
             Line::from(""),
             Line::from(""),
             Line::from(Span::styled(
@@ -529,15 +618,7 @@ fn render_splash(frame: &mut ratatui::Frame, watch_path: &str) {
 }
 
 fn render_main(frame: &mut ratatui::Frame, state: &AppState) {
-    let area = frame.area();
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Fill(1)])
-        .split(area);
-
-    menu::render_bar(frame, rows[0], &state.menu);
-    project::render(frame, rows[1], &state.projects, &state.proj);
-    menu::render_dropdown(frame, rows[0], &state.menu);
+    project::render(frame, frame.area(), &state.projects, &state.proj);
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {

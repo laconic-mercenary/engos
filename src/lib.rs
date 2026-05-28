@@ -42,6 +42,15 @@ pub mod capabilities;
 /// Project context menu — Open / Delete popup triggered from the project list.
 pub mod projectmenu;
 
+/// Game-style main menu — centred four-item landing screen.
+pub mod mainmenu;
+
+/// Project workspace — active engagement screen (project name placeholder for now).
+pub mod workspace;
+
+/// Options screen — appearance settings and future preferences.
+pub mod options;
+
 // Phase 3+: uncomment as each module is built.
 // pub mod ingest;   // artifact ingestion (text + image parsing)
 // pub mod model;    // ModelBackend trait + AnthropicBackend
