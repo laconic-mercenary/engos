@@ -1,31 +1,37 @@
 //! `engos` binary entry point.
 //!
-//! Handles CLI flags, ensures the config directory exists, loads project data,
-//! installs the panic hook, then hands off to the TUI.
-//! Nothing else lives here — logic belongs in library modules.
+//! Handles CLI flags, ensures the config directory exists, loads data,
+//! then hands off to the TUI — or runs a self-contained command if a
+//! recognised flag is passed.
 
-use engos::{config, tui};
+use engos::{anthropic, config, tui};
 
 fn main() -> std::io::Result<()> {
-    // Handle meta-flags before touching the terminal or the filesystem so
-    // --version and --help print to the normal shell without side effects.
-    let mut args = std::env::args().skip(1);
-    match args.next().as_deref() {
+    // Handle meta-flags before touching the terminal or the filesystem.
+    let first_arg = std::env::args().nth(1);
+    match first_arg.as_deref() {
         Some("--version") | Some("-V") => {
             println!("engos {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
         Some("--help") | Some("-h") => {
-            eprintln!("Usage: engos [path]");
-            eprintln!("  path   directory to watch (default: current directory)");
-            eprintln!("  q      quit");
+            eprintln!("Usage: engos [options]");
+            eprintln!();
+            eprintln!("Options:");
+            eprintln!("  --check       Verify Anthropic API connectivity using configured models");
+            eprintln!("  --version     Print version and exit");
+            eprintln!("  --help        Print this help text");
+            return Ok(());
+        }
+        // Run the API connectivity check and exit — no TUI involved.
+        Some("--check") => {
+            check_api();
             return Ok(());
         }
         _ => {}
     }
 
-    // Resolve the watch path before any terminal work so a missing path shows
-    // an error in the normal shell, not on a blank alternate screen.
+    // Resolve the watch path (unused until Phase 3 watcher wiring).
     let watch_path = std::env::args()
         .skip(1)
         .find(|a| !a.starts_with('-'))
@@ -36,33 +42,76 @@ fn main() -> std::io::Result<()> {
         std::process::exit(1);
     }
 
-    // Ensure ~/.engos/ exists. This prompts the operator if the directory is
-    // absent and seeds example data on first creation. Runs before the TUI
-    // enters alternate-screen mode so the prompt appears in the normal shell.
+    // Ensure ~/.engos/ exists — prompts on first run, seeds example data.
     config::ensure_config_dir()?;
 
-    // Load ~/.engos/config.yml. Returns a default (empty) Config if the file
-    // is absent or the operator declined to create the config dir — the TUI
-    // handles an empty project list gracefully.
     let cfg          = config::load_config();
-    let reports = cfg.reports;
+    let reports      = cfg.reports;
     let orchestrators = config::load_models();
 
-    // Install the panic hook so any panic restores the terminal before printing.
     tui::install_panic_hook();
 
-    // Enter TUI mode: raw input + alternate screen.
     let mut terminal = tui::enter()?;
-
-    // Run the render/event loop. Returns Ok(()) on clean exit, Err on I/O failure.
-    // orchestrators is passed by value — AppState owns the list so new entries
-    // created during the session can be appended and persisted.
-    // Both lists are passed by value — AppState owns them so new entries created
-    // during the session can be appended and persisted.
-    let result = tui::run(&mut terminal, &watch_path, reports, orchestrators);
-
-    // Always restore the terminal, even if run() returned an error.
+    let result       = tui::run(&mut terminal, &watch_path, reports, orchestrators);
     tui::exit(&mut terminal)?;
 
     result
+}
+
+/// Verify API connectivity for every configured Anthropic orchestrator.
+///
+/// Runs entirely in the normal shell — no TUI, no alternate screen. Prints
+/// a line-by-line status report so the operator can diagnose key or model
+/// issues before starting an engagement.
+fn check_api() {
+    println!("engos {} — API connectivity check", env!("CARGO_PKG_VERSION"));
+    println!();
+
+    // Load orchestrators from ~/.engos/models.yml. If the file is absent the
+    // config dir hasn't been created yet — tell the operator what to do.
+    let orchestrators = config::load_models();
+
+    let anthropic: Vec<_> = orchestrators
+        .iter()
+        .filter(|o| o.vendor == "anthropic")
+        .collect();
+
+    if anthropic.is_empty() {
+        println!("  No Anthropic models found in ~/.engos/models.yml");
+        println!("  Add one via  File › New Report › [ New ]  inside engos.");
+        return;
+    }
+
+    for orch in &anthropic {
+        println!("  ┌ {}", orch.name);
+
+        // Derive the bare model ID the API expects from the display name.
+        let model_id = anthropic::model_id(&orch.name);
+        println!("  │ model id : {model_id}");
+
+        // Check whether a key is configured — we do not print the key itself.
+        let Some(ref key) = orch.api_key else {
+            println!("  │ api key  : not configured");
+            println!("  └ SKIP — add a key via the New Model form\n");
+            continue;
+        };
+        if key.is_empty() {
+            println!("  │ api key  : empty string");
+            println!("  └ SKIP — re-enter the key via the New Model form\n");
+            continue;
+        }
+
+        println!("  │ api key  : configured ({} chars)", key.len());
+        print!(  "  │ testing  : ");
+        // Flush so the "testing" line appears before the network call blocks.
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+
+        match anthropic::check_connection(model_id, key) {
+            Ok(hint)  => println!("✓  OK  ({hint})"),
+            Err(msg)  => println!("✗  FAIL\n  │            {msg}"),
+        }
+        println!("  └");
+        println!();
+    }
 }

@@ -24,6 +24,9 @@ pub mod theme;
 /// Configuration directory management and project data loading.
 pub mod config;
 
+/// Anthropic API client — connectivity check and (Phase 3) full backend.
+pub mod anthropic;
+
 /// Report data model, navigation state, and rendering.
 pub mod report;
 
